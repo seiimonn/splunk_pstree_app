@@ -25,7 +25,7 @@
 
 
 from __future__ import absolute_import, division, print_function, unicode_literals
-import sys, collections, os
+import sys, collections, os, re
 splunkhome = os.environ['SPLUNK_HOME']
 sys.path.append(os.path.join(splunkhome, 'etc', 'apps', 'splunk_pstree_app', 'lib'))
 from splunklib.searchcommands import dispatch, EventingCommand, Configuration, Option, validators
@@ -79,6 +79,12 @@ class PSTreeCommand(EventingCommand):
         **Description:** Name of the field that holds detail value for child field''',
         require=False, validate=validators.Integer())
 
+        root_guid = Option(
+        doc='''
+        **Syntax:** **root_guid=***"guid"*
+        **Description:** guid of the process to use as root node''',
+        require=False)
+
         def make_tree(self,parent,details, tree, indent, return_array, prefix, spaces):
             #Adjust number of spaces to keep consistently spaced column for details
             space=" "
@@ -109,7 +115,6 @@ class PSTreeCommand(EventingCommand):
                 # For every event add parent as key in outer dict and child as key in nested dict
                 for record in records:
                     # If detail exists for the event set as value for inner dict other wise set as empty
-                    self.logger.debug('%s:%s', self.parent,record)
                     if self.detail:
                         tree[record[self.parent]][record[self.child]]=record[self.detail]
                     else:
@@ -117,8 +122,18 @@ class PSTreeCommand(EventingCommand):
                     #Add child to array to be able find root of pstree - every process associated with an EventCode 1 will be in this array
                     children.append(record[self.child])
                 for parent in tree:
+                    if self.root_guid:
+                        regex = "(\{[^\}]+\})"
+                        guid_search = re.search(regex, parent, re.IGNORECASE)
+                        if guid_search.group(1) == self.root_guid:
+                            tmp=[]
+                            #Recursively build tree for every root process
+                            self.make_tree(parent,'',tree,'',tmp,'',spaces)
+                            yield {"tree":tmp}
+                    else:
+
                     #For every parent check if in children array - only Parent Processes with no Process Creation event(Event Code 1) will match this criteria
-                    if parent not in children:
+                        if parent not in children:
                             tmp=[]
                             #Recursively build tree for every root process
                             self.make_tree(parent,'',tree,'',tmp,'',spaces)
